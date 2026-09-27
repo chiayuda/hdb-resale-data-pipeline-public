@@ -286,6 +286,78 @@ not just present.
 | `validation.reference_domains.town` / `flat_type` / `flat_model` | explicit lists, reviewed snapshot of the authoritative file | The accepted values for these three columns. Meant to be edited as review happens, not treated as fixed, the notebook/pipeline also computes the live equivalent and reports a diff if they ever disagree, so a stale list doesn't fail silently. `storey_range` deliberately stays live-derived, its real-world shape changed mid-window |
 | `validation.reference_exceptions.<column>` | mostly empty | Values allowed even though they're absent from `reference_domains`. Starts empty for every column: the workflow is run first, read the `UNKNOWN <COLUMN> DETECTED` output, then either add a value to `reference_domains` (if it belongs in the accepted set) or here (if it's a deliberate, reviewed exception), never pre-populated with guesses before anything has actually been flagged |
 
+Because every threshold, toggle, and accepted-value list lives in this one file and nothing is
+hardcoded in the notebook or `src/hdb_etl/`, changing pipeline behaviour never requires touching
+or redeploying code, only this file. A deployment could keep `config.yaml` outside the application
+package entirely (in S3, or a config service) and let a reviewer change a threshold or approve a
+new domain value by uploading a new file, no rebuild, no redeploy, and no code change for that
+edit.
+
+#### How to edit config.yaml
+
+A few concrete recipes. All of these are edits to `config.yaml` only, `run_pipeline.py` and the
+notebook both re-read it on every run, no code changes needed for any of them.
+
+**Turn a check off entirely** (the flag still exists as a column, just always `False`, it no
+longer fires or gates anything):
+
+```yaml
+block_format:
+  enabled: false   # was: true
+  pattern: '^\d+[A-Z]?$'
+```
+
+**Loosen or tighten a hard bound**, e.g. allow smaller flats down to 15 sqm:
+
+```yaml
+floor_area:
+  enabled: true
+  min_sqm: 15   # was: 20
+  max_sqm: 350
+```
+
+**Make a flag reported-only instead of gating**, e.g. stop `flag_storey_range` from quarantining
+rows, keep computing and reporting it: remove its line from `gating_flags`:
+
+```yaml
+gating_flags:
+  - flag_anomaly
+  - flag_floor_area
+  # - flag_storey_range   <- removed: reported only now, no longer excludes a row from Cleaned
+  - flag_missing_required_field
+```
+
+**Approve a new domain value**, after a run prints `UNKNOWN FLAT_MODEL DETECTED` and a person
+confirms it's genuine: either add it to `reference_domains` if it belongs in the accepted set, or
+to `reference_exceptions` if it's a deliberate, reviewed exception. `DBSS` is a real, currently
+open case: `config.yaml`'s own comment above `reference_exceptions` says it's "the one exception
+already populated", but `reference_exceptions.flat_model` is actually empty right now, and all 277
+real `DBSS` rows in this window are quarantined for `flag_flat_model` as a result (verified against
+`data/output/quarantined.csv`, zero `DBSS` rows reach `cleaned.csv`). To apply the exception the
+comment describes:
+
+```yaml
+reference_exceptions:
+  town: []
+  flat_type: []
+  flat_model:
+    - "DBSS"
+  storey_range: []
+```
+
+**Extend the analysis window**, once a newer source file covers more months:
+
+```yaml
+window_start: "2012-01"
+window_end: "2017-12"   # was: "2016-12"
+```
+
+No manifest step needed for this one: a dataset that's newly inside the window has no manifest
+entry yet (`_already_cached()` in `extraction.py` checks `manifest.get(dataset_id)` first, finds
+nothing, and downloads it), so it's fetched automatically on the next run. Manifest deletion only
+matters for forcing a re-download of a dataset that's already cached, see
+[Resilience](#resilience-rate-limits-retries-and-caching) above.
+
 #### Why domain knowledge, not profiling
 
 The hard-bound settings above (`resale_price_bounds`, `lease_commence.min_year`, `remaining_lease_bounds`,

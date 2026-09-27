@@ -292,11 +292,11 @@ validation:
   # Pre-guessing entries before a run has ever actually flagged them would
   # defeat that review step -- so this is intentionally not pre-populated
   # with plausible-looking guesses.
-  # flat_model.DBSS is the one exception already populated: it was found by
-  # actually running the pipeline against the real data, confirmed to be a
-  # genuine flat model absent from the Jan-2012 reference file (DBSS flats
-  # have a minimum occupation period before resale, so none existed yet as
-  # of that file), not guessed in advance.
+  # flat_model.DBSS: reviewed, confirmed a genuine flat model absent from
+  # the Jan-2012 reference file (DBSS flats have a minimum occupation period
+  # before resale, so none existed yet as of that file). Not added below, so
+  # it still quarantines under flag_flat_model (277 rows in this window).
+  # Add "DBSS" under flat_model below to accept it instead.
   reference_exceptions:
     town: []
     flat_type: []
