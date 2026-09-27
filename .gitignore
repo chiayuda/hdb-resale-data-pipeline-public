@@ -1,0 +1,9 @@
+.env
+**/.env
+.venv/
+**/.venv/
+__pycache__/
+**/__pycache__/
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+part_2/.drawio-export-profile/

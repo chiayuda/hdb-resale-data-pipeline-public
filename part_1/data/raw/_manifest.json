@@ -1,0 +1,20 @@
+{
+  "d_43f493c6c50d54243cc1eab0df142d6a": {
+    "path": "data/raw\\ResaleFlatPricesBasedonApprovalDate2000Feb2012_20260927T173131Z.csv",
+    "sha256": "5f6a72bd7b9120281863beb1fc4c89aa5f4923f00b0f6c52494c4347363f2c36",
+    "last_updated_at": "2024-08-28T14:06:52+08:00",
+    "fetched_at": "20260927T173131Z"
+  },
+  "d_2d5ff9ea31397b66239f245f57751537": {
+    "path": "data/raw\\ResaleFlatPricesBasedonRegistrationDateFromMar2012toDec2014_20260927T173131Z.csv",
+    "sha256": "6a16e2dc78f70048ec1a522b59a9727581c36e45e02022641c53e755a7657c72",
+    "last_updated_at": "2024-08-28T13:56:45+08:00",
+    "fetched_at": "20260927T173131Z"
+  },
+  "d_ea9ed51da2787afaf8e51f827c304208": {
+    "path": "data/raw\\ResaleFlatPricesBasedonRegistrationDateFromJan2015toDec2016_20260927T173131Z.csv",
+    "sha256": "4ff7ce4a4f642fb384d2b75a42e75b0477e50005f4aaa9989591a7a92507d185",
+    "last_updated_at": "2024-08-28T13:41:10+08:00",
+    "fetched_at": "20260927T173131Z"
+  }
+}

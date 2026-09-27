@@ -1,0 +1,6 @@
+pandas==1.5.3
+pyarrow==20.0.0
+requests==2.32.4
+pyyaml==6.0
+python-dotenv==1.2.3
+pytest==7.4.4

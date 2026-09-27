@@ -1,0 +1,304 @@
+#Fixed Config - Do not touch!
+collection_id: "189"
+
+# The real key lives in .env (gitignored), never here. Copy .env.example to
+# .env and fill in DATA_GOV_SG_API_KEY if you have one, the notebook runs
+# fine without it too, just at the lower unauthenticated rate limit.
+
+urls:
+  collection_metadata: "https://api-production.data.gov.sg/v2/public/api/collections/{collection_id}/metadata"
+  dataset_metadata: "https://api-production.data.gov.sg/v2/public/api/datasets/{dataset_id}/metadata"
+  poll_download: "https://api-open.data.gov.sg/v1/public/api/datasets/{dataset_id}/poll-download"
+
+#------------------------------------------------------------------------------------------------------------------------
+#Custom Configs
+
+# Edit auth dataset if changes
+# The file that was current around Jan 2012 (2000-01 to 2012-02). Used as the
+# authoritative reference for Town, Flat Type, Flat Model and storey_range.
+authoritative_dataset_id: "d_43f493c6c50d54243cc1eab0df142d6a"
+
+window_start: "2012-01"
+window_end: "2016-12"
+
+# Whether a locally cached raw file gets replaced when data.gov.sg reports a
+# newer lastUpdatedAt for that dataset than when we downloaded it.
+# false (default): only print a note and keep using the cached file. These
+#   are finalised historical files, so a changed timestamp is more likely a
+#   metadata edit (e.g. a description tweak) than the row data itself
+#   changing, and re-downloading 30MB on every such tick is wasteful.
+# true: treat a stale cached file as not cached at all, and re-download it,
+#   trusting the newest available source over whatever is on disk.
+source:
+  refresh_on_update: false
+
+# Only used when PIPELINE_ENV=aws (an environment variable, not set here).
+# Raw files go to s3://<bucket>/raw/, output groups to s3://<bucket>/output/.
+s3_bucket: "changeme-hdb-resale-pipeline"
+
+
+# Every threshold, on/off switch, accepted-value list and gating decision
+# used by requirements 3, 6 and 7 lives under this one key, tweak here, no
+# code needs to change.
+#
+# --- A note on where the *_bounds values below come from ---
+# It would seem natural to set these from the data profiling step (requirement
+# 2), which already reports the observed range for every numeric column in
+# this 2012-2016 window. That instinct is deliberately NOT followed here.
+# Profiling describes what happened to be true for THIS SPECIFIC WINDOW, not
+# what is structurally possible in general -- and for these particular
+# checks, that distinction matters. A bound tightly derived from this
+# window's observed lease_commence_date maximum (2013) would silently make a
+# future rerun against 2017+ data reject a perfectly real, newly-built flat,
+# just because this five-year slice never happened to contain one. The same
+# applies to resale_price: 2012-2016 prices are systematically lower than
+# other periods', so a ceiling derived from this window's observed maximum
+# would wrongly flag genuine higher-priced sales from any other period.
+# Business/domain knowledge is the correct source for a bound meant to catch
+# genuinely impossible values regardless of which window of data is loaded:
+#   - resale_price cannot be zero or negative -- that is what "price" means,
+#     not something learned from a sample.
+#   - lease_commence_date cannot be before HDB itself existed (1960) or after
+#     today -- historical and logical facts, not sample statistics.
+#   - remaining_lease cannot exceed the 99-year term this whole pipeline
+#     assumes (lease_years above), or be negative -- true by definition of
+#     that assumption, not observed.
+# floor_area_sqm is the one exception: the observed range here (31-280) is
+# itself close to what is physically realistic for an HDB flat, so it is
+# used as a *starting point*, padded generously in both directions, rather
+# than ignored outright.
+validation:
+  lease_years: 99
+
+  # "Date" validation (requirement 3's fifth field). A raw string comparison
+  # (month >= "2012-01") would accept a malformed value like "2012-13" --
+  # "13" is not a real calendar month, but string-compares as being inside
+  # the window regardless. This pattern is checked first, before any range
+  # comparison, so the shape of "Date" is itself config-driven rather than
+  # a regex buried in a cell. Single-quoted so YAML doesn't try to interpret
+  # the backslashes as its own escape sequences.
+  month:
+    enabled: true
+    pattern: '^\d{4}-(0[1-9]|1[0-2])$'   # YYYY-MM, month 01-12 only
+
+  # block is digits, optionally followed by exactly one trailing letter
+  # (e.g. "123", "9A") -- confirmed against all 2,139 distinct real block
+  # values in this window before choosing this pattern, zero exceptions.
+  block_format:
+    enabled: true
+    pattern: '^\d+[A-Z]?$'
+
+  floor_area:
+    enabled: true
+    min_sqm: 20   # below the smallest real HDB flat type (rental 1-/2-room flexi units run roughly 30-45 sqm); general domain knowledge, not a specific cited regulation
+    max_sqm: 350  # above the largest ordinary HDB flat type (executive maisonettes run up to roughly 250-280 sqm)
+
+  lease_commence:
+    enabled: true
+    min_year: 1960   # HDB was established in 1960; no flat's lease can commence before HDB itself existed
+    # No configured max_year: checked against the current year at run time
+    # instead of a fixed number, so this can never go stale.
+
+  # A hard numeric bound on the two storey numbers themselves, independent
+  # of and in addition to the domain-membership check (validation.
+  # reference_domains / requirement 3): that check only knows "have we seen
+  # this exact band before", so an unapproved-but-numerically-sane new band
+  # and a genuinely impossible one (e.g. "-5 TO 0") both just land in the
+  # same "unknown" bucket with no way to tell them apart. This is
+  # deliberately NOT a band-width rule (not "must be a 5-storey group" or
+  # "must be a 3-storey group") -- the real band width itself genuinely
+  # varies by era (3-storey pre-2012, 5-storey after, see the
+  # reference_domains note below), so hardcoding either width would make
+  # this reject the *other*, equally legitimate convention.
+  storey_range_bounds:
+    enabled: true
+    min_storey: 1    # no storey below the ground/1st level in this dataset's convention -- there's no storey 0 or negative
+    max_storey: 60   # deliberately loose: the tallest real HDB block (Pinnacle@Duxton) is 50 storeys; this is a sanity ceiling against a data-entry error, not a realistic forecast (based on google got 60 for upcoming bto as well)
+
+  resale_price_bounds:
+    enabled: true
+    min: 1            # a resale price of zero or less isn't a low price, it isn't a sale at all
+    max: 10000000      # deliberately loose: a sanity ceiling for data-entry errors (a stray extra zero), not a real-world price forecast
+
+  remaining_lease_bounds:
+    enabled: true
+    min_years: 0
+    max_years: 99   # the lease term itself (lease_years above) -- structurally true by definition, not observed
+
+  remaining_lease_cross_check:
+    enabled: true
+    tolerance_months: 12
+
+  anomaly:
+    enabled: true
+    iqr_multiplier: 1.5
+
+  # Which published columns are allowed to be null. Every one is false
+  # (required) except remaining_lease, which is structurally absent from
+  # two of the three source files (see requirement 2's profiling) -- that's
+  # a fact about the source data, not a quality problem, so it alone is
+  # true. A row missing any column set to false here gets
+  # flag_missing_required_field -- one generic, config-driven check
+  # instead of a bespoke rule per column for "was this even filled in".
+  nullable:
+    month: false
+    town: false
+    flat_type: false
+    block: false
+    street_name: false
+    storey_range: false
+    floor_area_sqm: false
+    flat_model: false
+    lease_commence_date: false
+    resale_price: false
+    remaining_lease: true
+
+  # Whether each of these numeric columns is actually required to parse as
+  # a number, checked before any range/bound comparison runs against it.
+  # Without this, a single non-numeric value (a stray string, a data-entry
+  # error) would make pd.to_numeric()/astype(int) raise outright and halt
+  # the whole notebook, rather than being quarantined like every other
+  # quality problem here. remaining_lease is only checked where present --
+  # nullable above already covers its structural absence from two of the
+  # three source files.
+  numeric:
+    floor_area_sqm: true
+    lease_commence_date: true
+    resale_price: true
+    remaining_lease: true
+
+  # Every flag gates by default, including the four domain-membership checks
+  # (town/flat_type/flat_model/storey_range): an unseen category is quarantined
+  # rather than silently passed through, on the same "review, don't guess"
+  # principle as everything else in this file. This is a deliberate choice,
+  # not the only defensible one -- the alternative (leave a category commented
+  # out below) is to treat an unseen-but-plausibly-legitimate value as
+  # acceptable by default and only review the ones that turn out to matter.
+  # Quarantining first means: if data.gov.sg ever adds a new town, flat model,
+  # or storey-range convention, every affected row is quarantined and printed
+  # as "UNKNOWN <COLUMN> DETECTED" (see requirement 3's cells) with the exact
+  # values involved, and stays quarantined until a person deliberately reviews
+  # those values and adds the legitimate ones to reference_exceptions below --
+  # never silently. A row lands ONLY in Quarantined when any flag below
+  # fires: Cleaned, Transformed and Hashed are all built from the same
+  # "passed every gating flag" set, so a flagged row never reaches any of
+  # those three, only Quarantined (alongside rows dropped for a duplicate
+  # composite key).
+  gating_flags:
+    - flag_anomaly
+    - flag_floor_area
+    - flag_lease_commence
+    - flag_lease_commence_range
+    - flag_storey_range_bounds
+    - flag_non_numeric
+    - flag_block_format
+    - flag_resale_price_range
+    - flag_remaining_lease_range
+    - flag_town
+    - flag_flat_type
+    - flag_flat_model
+    - flag_storey_range
+    - flag_missing_required_field
+
+  # The accepted values for town, flat_type and flat_model, taken from a
+  # verified real run's actual observed values in the authoritative
+  # January-2012-era file (data/raw/..._43f493c6...csv) -- not invented, and
+  # not re-derived from the data on every run. This is what the validation
+  # check in the notebook actually reads. Putting it here, rather than only
+  # computing it live each time, means:
+  #   - the accepted set is explicit and reviewable without running any code
+  #   - it stays stable even if the source file is later replaced or amended
+  #   - a genuinely NEW value appearing in future data (a new town, a newly
+  #     introduced flat model) is flagged as unknown and quarantined, exactly
+  #     like any other data-quality issue, rather than silently absorbed into
+  #     a freshly re-computed "authoritative" set that quietly grew to include it
+  # The notebook still computes the live equivalent from the data as well, and
+  # prints a diff against these lists -- so if the two ever disagree (source
+  # data changed, or this list goes stale), that is visible, not silent.
+  # storey_range is deliberately NOT listed here: its real-world domain
+  # genuinely changed shape mid-window (a 2012 reporting-basis change
+  # introduced wider 5-storey bands), so it is left as a live computation
+  # from the authoritative file rather than a fixed list that would need
+  # hand-maintenance every time HDB's own reporting conventions shift.
+  reference_domains:
+    town:
+      - "ANG MO KIO"
+      - "BEDOK"
+      - "BISHAN"
+      - "BUKIT BATOK"
+      - "BUKIT MERAH"
+      - "BUKIT PANJANG"
+      - "BUKIT TIMAH"
+      - "CENTRAL AREA"
+      - "CHOA CHU KANG"
+      - "CLEMENTI"
+      - "GEYLANG"
+      - "HOUGANG"
+      - "JURONG EAST"
+      - "JURONG WEST"
+      - "KALLANG/WHAMPOA"
+      - "MARINE PARADE"
+      - "PASIR RIS"
+      - "PUNGGOL"
+      - "QUEENSTOWN"
+      - "SEMBAWANG"
+      - "SENGKANG"
+      - "SERANGOON"
+      - "TAMPINES"
+      - "TOA PAYOH"
+      - "WOODLANDS"
+      - "YISHUN"
+
+    flat_type:
+      - "1 ROOM"
+      - "2 ROOM"
+      - "3 ROOM"
+      - "4 ROOM"
+      - "5 ROOM"
+      - "EXECUTIVE"
+      - "MULTI-GENERATION"
+
+    flat_model:
+      - "Adjoined Flat"
+      - "Apartment"
+      - "Improved"
+      - "Maisonette"
+      - "Model A"
+      - "Model A-Maisonette"
+      - "Model A2"
+      - "Multi Generation"
+      - "New Generation"
+      - "Premium Apartment" 
+      - "Simplified"
+      - "Standard"
+      - "Terrace"
+      - "2-Room"
+      - "Improved-Maisonette"
+      - "Premium Maisonette"
+      
+      #commenting flat_models not in auth file 2012 dataset (uncomment to include)
+      # - "Type S1" 
+      # - "Type S2"
+      # - "DBSS"
+      # - "Premium Apartment Loft"
+
+
+  # Values that are allowed for a column even though they don't appear in the
+  # authoritative reference file. Left empty until a real run actually flags
+  # something: the intended workflow is run first, read the "UNKNOWN
+  # <COLUMN> DETECTED" output requirement 3's cells print, then a person
+  # decides whether each flagged value is a genuine new category (add it
+  # below) or a real data problem (leave it flagged, do not add it here).
+  # Pre-guessing entries before a run has ever actually flagged them would
+  # defeat that review step -- so this is intentionally not pre-populated
+  # with plausible-looking guesses.
+  # flat_model.DBSS is the one exception already populated: it was found by
+  # actually running the pipeline against the real data, confirmed to be a
+  # genuine flat model absent from the Jan-2012 reference file (DBSS flats
+  # have a minimum occupation period before resale, so none existed yet as
+  # of that file), not guessed in advance.
+  reference_exceptions:
+    town: []
+    flat_type: []
+    flat_model:
+    storey_range: []

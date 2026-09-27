@@ -1,0 +1,19 @@
+# Secrets, never commit a real key
+.env
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Editor/IDE artifacts
+tempCodeRunnerFile.py
+.vscode/
+
+# OS cruft
+.DS_Store
+Thumbs.db
